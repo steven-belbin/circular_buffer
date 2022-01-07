@@ -4,15 +4,6 @@
 
 namespace prgrmr::generic
 {
-template<typename iterator_type>
-void append_values(const iterator_type first,
-                   const iterator_type last,
-                   std::vector<typename iterator_type::value_type>& values)
-{
-    values.reserve(values.capacity() + std::distance(first, last));
-    std::copy(first, last, std::back_insert_iterator(values));
-}
-
 template<typename value_type, std::size_t capacity_limit>
 class circular_buffer
 {
@@ -20,18 +11,22 @@ class circular_buffer
         using buffer_type = std::vector<value_type>;
 
         buffer_type _buffer;
-        std::size_t _current_index{ 0 };
+        buffer_type::iterator _tail; // Tail is the earliest entry.
+        buffer_type::iterator _head; // Head is the beyond the most recent entry.
 
     public:
         circular_buffer()
         {
             _buffer.reserve(capacity_limit);
+            _tail = std::begin(_buffer);
+            _head = std::end(_buffer);
         }
 
         void clear()
         {
             _buffer.clear();
-            _current_index = 0;
+            _tail = std::begin(_buffer);
+            _head = std::end(_buffer);
         }
 
         auto size() const
@@ -59,16 +54,18 @@ class circular_buffer
             if (!is_filled())
             {
                 _buffer.push_back(value);
+                _head = std::end(_buffer);
             }
             else
             {
-                if (_current_index == capacity())
-                    _current_index = 0;
+                if (_head == std::end(_buffer))
+                    _head = std::begin(_buffer);
 
-                _buffer[_current_index] = value;
+                *_head = value;
+
+                _tail = _head;
+                ++_head;
             }
-
-            ++_current_index;
         }
 
         auto latest(const std::size_t num_elements) const
@@ -76,19 +73,21 @@ class circular_buffer
             std::vector<value_type> values;
             values.reserve(std::min(num_elements, size()));
 
-            auto remaining_count = values.capacity();
+            const auto first = std::rbegin(_buffer);
+            auto last = first + values.capacity();
+            const auto back_inserter = std::back_insert_iterator(values);
 
-            if (is_filled() && remaining_count > 0)
+            if (is_filled() && first != last)
             {
-                const auto first = _buffer.rend() - _current_index;
-                const auto last = _buffer.rend();
+                const auto start = std::rend(_buffer) + distance_from_begin();
+                const auto finish = std::rend(_buffer);
 
-                append_values(first, last, values);
+                std::copy(start, finish, back_inserter);
 
-                remaining_count -= values.size();
+                last -= values.size();
             }
 
-            append_values(_buffer.rbegin(), _buffer.rbegin() + remaining_count, values);
+            std::copy(first, last, back_inserter);
 
             return values;
         }
@@ -98,23 +97,45 @@ class circular_buffer
             std::vector<value_type> values;
             values.reserve(std::min(num_elements, size()));
 
-            auto remaining_count = values.capacity();
+            const auto first = std::begin(_buffer);
+            auto last = first + values.capacity();
+            const auto back_inserter = std::back_insert_iterator(values);
 
-            if (is_filled() && remaining_count > 0)
+            if (is_filled() && first != last)
             {
-                const auto first = _buffer.begin() + _current_index;
-                const auto last = (size() - _current_index > remaining_count)
-                                ? first + remaining_count
-                                : _buffer.end();
+                const auto available_count =
+                    std::min(distance_from_end(), values.capacity());
 
-                append_values(first, last, values);
+                const auto start = _head;
+                const auto finish = _head + available_count;
 
-                remaining_count -= values.size();
+                std::copy(start, finish, back_inserter);
+                
+                last -= values.size();
             }
 
-            append_values(_buffer.begin(), _buffer.begin() + remaining_count, values);
+            std::copy(first, last, back_inserter);
 
             return values;
+        }
+
+    private:
+        auto distance_from_begin() const
+        {
+            using iter_type = buffer_type::const_iterator;
+
+            const auto distance = std::distance<iter_type>(_head, std::begin(_buffer));
+
+            return static_cast<std::size_t>(distance);
+        }
+
+        auto distance_from_end() const
+        {
+            using iter_type = buffer_type::const_iterator;
+
+            const auto distance = std::distance<iter_type>(_head, std::end(_buffer));
+
+            return static_cast<std::size_t>(distance);
         }
 };
 }
